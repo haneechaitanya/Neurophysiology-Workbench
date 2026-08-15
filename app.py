@@ -1,14 +1,39 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import sys
+from pathlib import Path
 
 import mne
 import numpy as np
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
+from erpworkbench import __version__
 from erpworkbench.main_window import ERPWorkbench
 
+
+
+def resource_path(*parts: str) -> Path:
+    """Resolve bundled/static resources in source and PyInstaller builds."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base = Path(sys._MEIPASS)
+    else:
+        base = Path(__file__).resolve().parent
+    return base.joinpath(*parts)
+
+
+def configure_windows_app_identity() -> None:
+    """Give the frozen app a stable Windows taskbar identity."""
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "NeurophysiologyWorkbench.ERPWorkbench"
+        )
+    except Exception:
+        pass
 
 def make_demo_raw():
     """Synthetic EEG for GUI development: use `python app.py --demo`."""
@@ -44,11 +69,22 @@ def main():
     parser.add_argument("--demo", action="store_true", help="start with synthetic EEG for GUI testing")
     args = parser.parse_args()
 
+    configure_windows_app_identity()
+
     app = QApplication(sys.argv)
     app.setApplicationName("ERP Workbench")
-    app.setApplicationVersion("1.0.0rc4")
+    app.setApplicationVersion(__version__)
+    # Keep this stable so existing QSettings/preferences are not reset.
     app.setOrganizationName("ERP Workbench")
+
+    icon_path = resource_path("assets", "erp_workbench_icon.png")
+    app_icon = QIcon(str(icon_path)) if icon_path.exists() else QIcon()
+    if not app_icon.isNull():
+        app.setWindowIcon(app_icon)
+
     window = ERPWorkbench()
+    if not app_icon.isNull():
+        window.setWindowIcon(app_icon)
     if args.demo:
         raw = make_demo_raw()
         window.original_raw = raw

@@ -1,5 +1,5 @@
 #define MyAppName "ERP Workbench"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.0rc4"
 #define MyAppPublisher "ERP Workbench"
 #define MyAppExeName "ERPWorkbench.exe"
 
@@ -14,14 +14,18 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=..\release
-OutputBaseFilename=ERP_Workbench_1.0_Setup
+OutputBaseFilename=ERP_Workbench_1.0.0rc4_Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-UninstallDisplayName=ERP Workbench 1.0
+UninstallDisplayName={#MyAppName} {#MyAppVersion}
 SetupLogging=yes
+SetupIconFile=..\assets\ERPWorkbench.ico
+UninstallDisplayIcon={app}\{#MyAppExeName}
+CloseApplications=yes
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
