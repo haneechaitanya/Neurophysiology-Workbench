@@ -1007,8 +1007,12 @@ class ERPWorkbench(QMainWindow):
         # this panel now scrolls vertically instead, while the EEG viewer keeps
         # the rest of the window.
         controls_widget = QWidget()
-        controls_widget.setMinimumWidth(310)
+        # The sidebar content is allowed to shrink; QFormLayout rows reflow
+        # instead of keeping a hidden fixed-width child behind the scroll area.
+        controls_widget.setMinimumWidth(0)
+        controls_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.preproc_controls_widget = controls_widget
+        self._preproc_responsive_forms = []
         controls = QVBoxLayout(controls_widget)
         controls.setContentsMargins(10, 8, 10, 14)
         controls.setSpacing(14)
@@ -1017,7 +1021,7 @@ class ERPWorkbench(QMainWindow):
         self.preproc_scroll.setWidgetResizable(True)
         self.preproc_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.preproc_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.preproc_scroll.setMinimumWidth(330)
+        self.preproc_scroll.setMinimumWidth(320)
         self.preproc_scroll.setMaximumWidth(520)
         self.preproc_scroll.setWidget(controls_widget)
         self.preproc_scroll.setToolTip(
@@ -1029,6 +1033,8 @@ class ERPWorkbench(QMainWindow):
         file_form.setContentsMargins(12, 14, 12, 12)
         file_form.setHorizontalSpacing(12)
         file_form.setVerticalSpacing(10)
+        file_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self._preproc_responsive_forms.append(file_form)
         self.file_label = QLabel("No file loaded")
         self.file_label.setWordWrap(True)
         self.subject_edit = QLineEdit()
@@ -1056,6 +1062,8 @@ class ERPWorkbench(QMainWindow):
         fg.setContentsMargins(14, 12, 14, 14)
         fg.setHorizontalSpacing(12)
         fg.setVerticalSpacing(12)
+        fg.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self._preproc_responsive_forms.append(fg)
         self.hp = ReliableDoubleSpinBox(); self.hp.setRange(0, 200); self.hp.setDecimals(2); self.hp.setValue(0.5); self.hp.setSuffix(" Hz")
         self.lp = ReliableDoubleSpinBox(); self.lp.setRange(0, 1000); self.lp.setDecimals(1); self.lp.setValue(35); self.lp.setSuffix(" Hz")
         self.notch_check = QCheckBox("Enable notch")
@@ -1073,6 +1081,8 @@ class ERPWorkbench(QMainWindow):
         ig.setContentsMargins(14, 12, 14, 14)
         ig.setHorizontalSpacing(12)
         ig.setVerticalSpacing(12)
+        ig.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self._preproc_responsive_forms.append(ig)
         self.bad_channels_label = QLabel("None")
         self.bad_channels_label.setWordWrap(True)
         bad_btn = QPushButton("Select channels…")
@@ -1089,6 +1099,8 @@ class ERPWorkbench(QMainWindow):
         rg.setContentsMargins(14, 12, 14, 14)
         rg.setHorizontalSpacing(12)
         rg.setVerticalSpacing(12)
+        rg.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self._preproc_responsive_forms.append(rg)
         self.ref_mode = QComboBox(); self.ref_mode.addItems(["average", "custom"])
         self.ref_custom = QLineEdit(); self.ref_custom.setPlaceholderText("e.g. M1,M2")
         rg.addRow("Mode", self.ref_mode)
@@ -1121,6 +1133,7 @@ class ERPWorkbench(QMainWindow):
         self.pipeline_label.setWordWrap(True)
         stack_rule = QLabel("Structural rule: Interpolate → Re-reference → ICA (BETA)")
         stack_rule.setProperty("muted", True)
+        stack_rule.setWordWrap(True)
         stack_rule.setToolTip(
             "Unchecking an earlier structural step also undoes later steps in reverse order. "
             "Filtering remains order-independent."
@@ -1152,6 +1165,7 @@ class ERPWorkbench(QMainWindow):
         splitter.setStretchFactor(1, 1)
         splitter.setCollapsible(0, False)
         splitter.setSizes([380, 1120])
+        splitter.splitterMoved.connect(lambda *_: self._apply_sidebar_reflow())
         layout.addWidget(splitter)
         self.tabs.addTab(page, "1  Continuous EEG")
 
@@ -1739,7 +1753,9 @@ class ERPWorkbench(QMainWindow):
         self.ica_fit_splitter = QSplitter(Qt.Orientation.Horizontal)
         fit_outer.addWidget(self.ica_fit_splitter)
 
-        side_content = QWidget(); side_layout = QVBoxLayout(side_content)
+        side_content = QWidget(); side_content.setMinimumWidth(0); side_content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.ica_fit_side_content = side_content
+        side_layout = QVBoxLayout(side_content)
         side_layout.setContentsMargins(8, 8, 8, 8); side_layout.setSpacing(10)
 
         side_header = QHBoxLayout()
@@ -1752,8 +1768,13 @@ class ERPWorkbench(QMainWindow):
 
         fit_settings = QGroupBox("Fit settings")
         fit_settings_layout = QGridLayout(fit_settings)
-        fit_settings_layout.addWidget(QLabel("Method"), 0, 0); fit_settings_layout.addWidget(self.ica_method, 0, 1)
-        fit_settings_layout.addWidget(QLabel("Dimensionality"), 1, 0); fit_settings_layout.addWidget(self.ica_components, 1, 1)
+        self.ica_fit_settings_layout = fit_settings_layout
+        self.ica_method_label = QLabel("Method")
+        self.ica_dim_label = QLabel("Dimensionality")
+        fit_settings_layout.addWidget(self.ica_method_label, 0, 0); fit_settings_layout.addWidget(self.ica_method, 0, 1)
+        fit_settings_layout.addWidget(self.ica_dim_label, 1, 0); fit_settings_layout.addWidget(self.ica_components, 1, 1)
+        fit_settings_layout.setColumnStretch(1, 1)
+        self.ica_method.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         dim_hint = QLabel("0.99 = enough PCA dimensions for >99% variance; blank = MNE default/rank-aware")
         dim_hint.setWordWrap(True); dim_hint.setProperty("muted", True)
         fit_settings_layout.addWidget(dim_hint, 2, 0, 1, 2)
@@ -1770,18 +1791,26 @@ class ERPWorkbench(QMainWindow):
 
         exclusion_box = QGroupBox("ICA-fit exclusions")
         exclusion_layout = QVBoxLayout(exclusion_box)
-        reason_row = QHBoxLayout()
+        reason_row = QGridLayout()
+        self.ica_reason_layout = reason_row
+        self.ica_reason_label = QLabel("Reason")
         self.ica_exclusion_reason = QLineEdit("neck movement")
         self.ica_exclusion_reason.setToolTip("Free-text reason stored in preprocessing provenance.")
-        mark_visible = QPushButton("Exclude visible span"); mark_visible.clicked.connect(self._ica_exclude_visible_span)
-        reason_row.addWidget(QLabel("Reason")); reason_row.addWidget(self.ica_exclusion_reason, 1); reason_row.addWidget(mark_visible)
+        self.ica_exclusion_reason.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.ica_mark_visible_btn = QPushButton("Exclude visible span"); self.ica_mark_visible_btn.clicked.connect(self._ica_exclude_visible_span)
+        reason_row.addWidget(self.ica_reason_label, 0, 0); reason_row.addWidget(self.ica_exclusion_reason, 0, 1); reason_row.addWidget(self.ica_mark_visible_btn, 0, 2)
+        reason_row.setColumnStretch(1, 1)
         exclusion_layout.addLayout(reason_row)
 
-        exact_row = QHBoxLayout()
+        exact_row = QGridLayout()
+        self.ica_exact_layout = exact_row
+        self.ica_start_label = QLabel("Start")
+        self.ica_end_label = QLabel("End")
         self.ica_excl_start = ReliableDoubleSpinBox(); self.ica_excl_start.setRange(0.0, 100000.0); self.ica_excl_start.setDecimals(3); self.ica_excl_start.setSuffix(" s")
         self.ica_excl_end = ReliableDoubleSpinBox(); self.ica_excl_end.setRange(0.0, 100000.0); self.ica_excl_end.setDecimals(3); self.ica_excl_end.setSuffix(" s")
-        add_exact = QPushButton("Add span"); add_exact.clicked.connect(self._ica_add_exact_exclusion)
-        exact_row.addWidget(QLabel("Start")); exact_row.addWidget(self.ica_excl_start); exact_row.addWidget(QLabel("End")); exact_row.addWidget(self.ica_excl_end); exact_row.addWidget(add_exact)
+        self.ica_add_exact_btn = QPushButton("Add span"); self.ica_add_exact_btn.clicked.connect(self._ica_add_exact_exclusion)
+        exact_row.addWidget(self.ica_start_label, 0, 0); exact_row.addWidget(self.ica_excl_start, 0, 1); exact_row.addWidget(self.ica_end_label, 0, 2); exact_row.addWidget(self.ica_excl_end, 0, 3); exact_row.addWidget(self.ica_add_exact_btn, 0, 4)
+        exact_row.setColumnStretch(1, 1); exact_row.setColumnStretch(3, 1)
         exclusion_layout.addLayout(exact_row)
 
         self.ica_exclusion_table = QTableWidget(0, 3)
@@ -1793,20 +1822,23 @@ class ERPWorkbench(QMainWindow):
         self.ica_exclusion_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.ica_exclusion_table.setMinimumHeight(125)
         exclusion_layout.addWidget(self.ica_exclusion_table)
-        table_buttons=QHBoxLayout()
-        remove_span=QPushButton("Remove selected"); remove_span.clicked.connect(self._ica_remove_selected_exclusion)
-        clear_spans=QPushButton("Clear all"); clear_spans.clicked.connect(self._ica_clear_exclusions)
-        table_buttons.addWidget(remove_span); table_buttons.addWidget(clear_spans); table_buttons.addStretch(1)
+        table_buttons=QGridLayout()
+        self.ica_table_buttons_layout = table_buttons
+        self.ica_remove_span_btn=QPushButton("Remove selected"); self.ica_remove_span_btn.clicked.connect(self._ica_remove_selected_exclusion)
+        self.ica_clear_spans_btn=QPushButton("Clear all"); self.ica_clear_spans_btn.clicked.connect(self._ica_clear_exclusions)
+        table_buttons.addWidget(self.ica_remove_span_btn, 0, 0); table_buttons.addWidget(self.ica_clear_spans_btn, 0, 1); table_buttons.setColumnStretch(2, 1)
         exclusion_layout.addLayout(table_buttons)
         side_layout.addWidget(exclusion_box, 1)
 
         speed = QGroupBox("Fit speed")
         perf = QVBoxLayout(speed)
-        fast_row = QHBoxLayout()
+        fast_row = QGridLayout()
+        self.ica_fast_layout = fast_row
         self.ica_fast_fit = QCheckBox("Use every Nth sample while fitting")
+        self.ica_decim_label = QLabel("N")
         self.ica_decim = ReliableSpinBox(); self.ica_decim.setRange(2, 20); self.ica_decim.setValue(2); self.ica_decim.setEnabled(False)
         self.ica_fast_fit.toggled.connect(self.ica_decim.setEnabled)
-        fast_row.addWidget(self.ica_fast_fit); fast_row.addWidget(QLabel("N")); fast_row.addWidget(self.ica_decim); fast_row.addStretch(1)
+        fast_row.addWidget(self.ica_fast_fit, 0, 0); fast_row.addWidget(self.ica_decim_label, 0, 1); fast_row.addWidget(self.ica_decim, 0, 2); fast_row.setColumnStretch(3, 1)
         perf.addLayout(fast_row)
         fast_note = QLabel("Decimation affects only the temporary ICA fitting operation; component removal is reconstructed on the full-resolution recording.")
         fast_note.setWordWrap(True); fast_note.setProperty("muted", True); perf.addWidget(fast_note)
@@ -1817,7 +1849,7 @@ class ERPWorkbench(QMainWindow):
         self.ica_fit_side_scroll.setWidgetResizable(True)
         self.ica_fit_side_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.ica_fit_side_scroll.setWidget(side_content)
-        self.ica_fit_side_scroll.setMinimumWidth(330); self.ica_fit_side_scroll.setMaximumWidth(500)
+        self.ica_fit_side_scroll.setMinimumWidth(280); self.ica_fit_side_scroll.setMaximumWidth(500)
 
         graph_panel = QWidget(); graph_layout = QVBoxLayout(graph_panel)
         graph_layout.setContentsMargins(4, 4, 4, 4); graph_layout.setSpacing(5)
@@ -1841,6 +1873,7 @@ class ERPWorkbench(QMainWindow):
         self.ica_fit_splitter.setStretchFactor(0, 0); self.ica_fit_splitter.setStretchFactor(1, 1)
         self.ica_fit_splitter.setCollapsible(0, True)
         self.ica_fit_splitter.setSizes([400, 1080])
+        self.ica_fit_splitter.splitterMoved.connect(lambda *_: self._apply_sidebar_reflow())
         self.ica_workspace_tabs.addTab(fit_page, "1  Fit data / exclusions")
 
         # --- 2. Components ---
@@ -5475,45 +5508,149 @@ class ERPWorkbench(QMainWindow):
         if timer is not None:
             timer.start()
 
-    def _apply_responsive_layout(self):
-        """Resize side/control panels proportionally to the available window width.
+    def _set_form_compact(self, form: QFormLayout, compact: bool):
+        """Stack form labels above fields when a sidebar becomes narrow."""
+        form.setRowWrapPolicy(
+            QFormLayout.RowWrapPolicy.WrapAllRows if compact
+            else QFormLayout.RowWrapPolicy.DontWrapRows
+        )
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        form.setFormAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
-        Controls stay scrollable instead of being clipped.  This changes only
-        layout geometry and never touches EEG/ERP data or display scaling.
-        """
+    @staticmethod
+    def _remove_widgets_from_grid(layout: QGridLayout, widgets):
+        for widget in widgets:
+            if widget is not None:
+                layout.removeWidget(widget)
+
+    def _reflow_ica_controls(self, compact: bool):
+        """Rearrange ICA control rows instead of clipping them behind the sidebar."""
+        if not hasattr(self, "ica_fit_settings_layout"):
+            return
+
+        # Fit settings
+        grid = self.ica_fit_settings_layout
+        fit_widgets = [self.ica_method_label, self.ica_method, self.ica_dim_label, self.ica_components,
+                       self.run_ica_btn, self.ica_fit_progress, self.ica_fit_eta]
+        self._remove_widgets_from_grid(grid, fit_widgets)
+        # dim_hint is left in the same grid; find and temporarily remove it.
+        dim_hint = None
+        for i in range(grid.count()):
+            item = grid.itemAt(i)
+            w = item.widget() if item else None
+            if isinstance(w, QLabel) and "enough PCA dimensions" in w.text():
+                dim_hint = w
+                break
+        if dim_hint is not None:
+            grid.removeWidget(dim_hint)
+        if compact:
+            grid.addWidget(self.ica_method_label, 0, 0, 1, 2)
+            grid.addWidget(self.ica_method, 1, 0, 1, 2)
+            grid.addWidget(self.ica_dim_label, 2, 0, 1, 2)
+            grid.addWidget(self.ica_components, 3, 0, 1, 2)
+            if dim_hint is not None:
+                grid.addWidget(dim_hint, 4, 0, 1, 2)
+            grid.addWidget(self.run_ica_btn, 5, 0, 1, 2)
+            grid.addWidget(self.ica_fit_progress, 6, 0, 1, 2)
+            grid.addWidget(self.ica_fit_eta, 7, 0, 1, 2)
+        else:
+            grid.addWidget(self.ica_method_label, 0, 0); grid.addWidget(self.ica_method, 0, 1)
+            grid.addWidget(self.ica_dim_label, 1, 0); grid.addWidget(self.ica_components, 1, 1)
+            if dim_hint is not None:
+                grid.addWidget(dim_hint, 2, 0, 1, 2)
+            grid.addWidget(self.run_ica_btn, 3, 0, 1, 2)
+            grid.addWidget(self.ica_fit_progress, 4, 0, 1, 2)
+            grid.addWidget(self.ica_fit_eta, 5, 0, 1, 2)
+
+        # Exclusion reason row
+        rg = self.ica_reason_layout
+        self._remove_widgets_from_grid(rg, [self.ica_reason_label, self.ica_exclusion_reason, self.ica_mark_visible_btn])
+        if compact:
+            rg.addWidget(self.ica_reason_label, 0, 0)
+            rg.addWidget(self.ica_exclusion_reason, 0, 1)
+            rg.addWidget(self.ica_mark_visible_btn, 1, 0, 1, 2)
+        else:
+            rg.addWidget(self.ica_reason_label, 0, 0)
+            rg.addWidget(self.ica_exclusion_reason, 0, 1)
+            rg.addWidget(self.ica_mark_visible_btn, 0, 2)
+        rg.setColumnStretch(1, 1)
+
+        # Exact start/end entry
+        eg = self.ica_exact_layout
+        exact_widgets = [self.ica_start_label, self.ica_excl_start, self.ica_end_label, self.ica_excl_end, self.ica_add_exact_btn]
+        self._remove_widgets_from_grid(eg, exact_widgets)
+        if compact:
+            eg.addWidget(self.ica_start_label, 0, 0); eg.addWidget(self.ica_excl_start, 0, 1)
+            eg.addWidget(self.ica_end_label, 1, 0); eg.addWidget(self.ica_excl_end, 1, 1)
+            eg.addWidget(self.ica_add_exact_btn, 2, 0, 1, 2)
+        else:
+            eg.addWidget(self.ica_start_label, 0, 0); eg.addWidget(self.ica_excl_start, 0, 1)
+            eg.addWidget(self.ica_end_label, 0, 2); eg.addWidget(self.ica_excl_end, 0, 3)
+            eg.addWidget(self.ica_add_exact_btn, 0, 4)
+        eg.setColumnStretch(1, 1)
+        if not compact:
+            eg.setColumnStretch(3, 1)
+
+        # Fit-speed row
+        fg = self.ica_fast_layout
+        self._remove_widgets_from_grid(fg, [self.ica_fast_fit, self.ica_decim_label, self.ica_decim])
+        if compact:
+            fg.addWidget(self.ica_fast_fit, 0, 0, 1, 2)
+            fg.addWidget(self.ica_decim_label, 1, 0); fg.addWidget(self.ica_decim, 1, 1)
+        else:
+            fg.addWidget(self.ica_fast_fit, 0, 0); fg.addWidget(self.ica_decim_label, 0, 1); fg.addWidget(self.ica_decim, 0, 2)
+
+    def _apply_sidebar_reflow(self):
+        """Reflow controls according to the *actual* sidebar viewport width."""
+        if hasattr(self, "preproc_scroll"):
+            vw = max(1, self.preproc_scroll.viewport().width())
+            compact = vw < 335
+            for form in getattr(self, "_preproc_responsive_forms", []):
+                self._set_form_compact(form, compact)
+            if hasattr(self, "preproc_controls_widget"):
+                self.preproc_controls_widget.setMinimumWidth(0)
+                self.preproc_controls_widget.setMaximumWidth(16777215)
+
+        if hasattr(self, "ica_fit_side_scroll") and self.ica_fit_side_scroll.isVisible():
+            vw = max(1, self.ica_fit_side_scroll.viewport().width())
+            self._reflow_ica_controls(vw < 370)
+            if hasattr(self, "ica_fit_side_content"):
+                self.ica_fit_side_content.setMinimumWidth(0)
+                self.ica_fit_side_content.setMaximumWidth(16777215)
+
+    def _apply_responsive_layout(self):
+        """Resize side/control panels and reflow their contents to available space."""
         width = max(700, int(self.centralWidget().width() if self.centralWidget() else self.width()))
 
-        # Continuous preprocessing sidebar: ~28% on ordinary screens, capped so
-        # ultrawide monitors do not waste plot area.
+        # Continuous preprocessing sidebar: never force a hidden fixed-width child.
         if hasattr(self, "preproc_scroll"):
-            side = max(250, min(440, int(width * (0.31 if width < 1100 else 0.27))))
-            self.preproc_scroll.setMinimumWidth(min(250, side))
-            self.preproc_scroll.setMaximumWidth(side)
-            if hasattr(self, "preproc_controls_widget"):
-                self.preproc_controls_widget.setMinimumWidth(max(230, side - 24))
+            side = max(320, min(440, int(width * (0.31 if width < 1100 else 0.27))))
+            self.preproc_scroll.setMinimumWidth(320)
+            self.preproc_scroll.setMaximumWidth(520)
             sp = getattr(self, "continuous_splitter", None)
             if sp is not None and sp.width() > 0:
                 total = max(1, sp.width())
-                sp.setSizes([min(side, max(250, total - 360)), max(360, total - side)])
+                left = min(side, max(320, total - 360))
+                sp.setSizes([left, max(360, total - left)])
 
-        # ICA fit sidebar uses the same principle but can be narrower because it
-        # contains fewer controls than the main preprocessing panel.
+        # ICA fit sidebar follows the same rule.
         if hasattr(self, "ica_fit_side_scroll") and self.ica_fit_side_scroll.isVisible():
-            side = max(245, min(410, int(width * (0.30 if width < 1100 else 0.25))))
-            self.ica_fit_side_scroll.setMinimumWidth(min(245, side))
-            self.ica_fit_side_scroll.setMaximumWidth(side)
+            side = max(285, min(410, int(width * (0.30 if width < 1100 else 0.25))))
+            self.ica_fit_side_scroll.setMinimumWidth(280)
+            self.ica_fit_side_scroll.setMaximumWidth(500)
             if hasattr(self, "ica_fit_splitter") and self.ica_fit_splitter.width() > 0:
                 total = max(1, self.ica_fit_splitter.width())
-                self.ica_fit_splitter.setSizes([min(side, max(245, total - 360)), max(360, total - side)])
+                left = min(side, max(280, total - 360))
+                self.ica_fit_splitter.setSizes([left, max(360, total - left)])
 
-        # Epoch review table gets enough width for status/reason columns, but
-        # yields proportionally more space to the waveform on laptop screens.
+        # Epoch review table remains scrollable, with plot priority on laptops.
         if hasattr(self, "review_splitter") and self.review_splitter.width() > 0:
             total = self.review_splitter.width()
             left = max(280, min(520, int(total * (0.37 if total < 1200 else 0.32))))
             self.review_splitter.setSizes([left, max(360, total - left)])
 
-        # Subject and grand-average component panels adapt similarly when open.
+        # Subject and grand-average component tables already have internal scrolling;
+        # resize only the panel, never its scientific display state.
         for splitter_name, panel_name, body_name in (
             ("erp_upper_splitter", "component_panel", "component_body"),
             ("grand_upper_splitter", "grand_component_panel", "grand_component_body"),
@@ -5523,9 +5660,11 @@ class ERPWorkbench(QMainWindow):
                 continue
             total = sp.width()
             if body is not None and body.isVisible():
-                left = max(270, min(420, int(total * (0.31 if total < 1200 else 0.28))))
-                panel.setMinimumWidth(min(270, left)); panel.setMaximumWidth(max(300, left))
+                left = max(280, min(420, int(total * (0.31 if total < 1200 else 0.28))))
+                panel.setMinimumWidth(270); panel.setMaximumWidth(max(300, left))
                 sp.setSizes([left, max(360, total - left)])
+
+        self._apply_sidebar_reflow()
 
     def _toggle_command_prompt(self, checked: bool):
         """Show/hide this process's Windows console rather than launching a dummy shell.
