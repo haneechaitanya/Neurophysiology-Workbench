@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import traceback
 import math
+import json
 import copy
 import os
 import re
@@ -16,6 +17,7 @@ from typing import Any, Callable
 import mne
 import numpy as np
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Qt, Signal, Slot, QSettings, QStandardPaths, QUrl
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QKeySequence, QPalette, QShortcut, QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -472,6 +474,12 @@ class HelpTopicDialog(QDialog):
         self.setWindowTitle(f"ERP Workbench Help — {topic}")
         self.resize(760, 560)
         browser=QTextBrowser(); browser.setOpenExternalLinks(True)
+        browser.document().setDefaultStyleSheet(
+            "body { font-family: 'Segoe UI'; font-size: 11pt; line-height: 1.35; } "
+            "h2 { font-size: 18pt; font-weight: 700; margin: 2px 0 10px 0; } "
+            "h3 { font-size: 12.5pt; font-weight: 650; margin: 16px 0 5px 0; } "
+            "p { margin: 4px 0 9px 0; } li { margin: 3px 0; }"
+        )
         science="".join(f'<li><a href="{url}">{label}</a></li>' for label,url in info.get("science",[]))
         mne_links="".join(f'<li><a href="{url}">{label}</a></li>' for label,url in info.get("mne",[]))
         browser.setHtml(
@@ -491,13 +499,23 @@ class HelpTopicDialog(QDialog):
 class ERPWorkbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ERP Workbench 1.0 — MNE (ICA BETA)")
+        self.setWindowTitle("ERP Workbench")
         self.resize(1500, 920)
 
         self.app_settings = QSettings("ERP Workbench", "ERP Workbench")
         self._auto_update_checks = str(self.app_settings.value("updates/auto_check", "true")).lower() not in {"0", "false", "no"}
         self._update_check_inflight = False
+        self._update_manual_waiting = False
+        self._update_check_generation = 0
+        self._update_active_generation = 0
+        self._update_check_timeout_ms = 15000
         self._update_download_inflight = False
+        # Stable-release checks use Qt's asynchronous networking rather than a
+        # Python worker thread. This keeps DNS/socket activity outside the UI
+        # thread and, importantly, gives the GUI a reply object it can abort on
+        # timeout instead of waiting for a stuck urllib worker.
+        self._update_network_manager = QNetworkAccessManager(self)
+        self._update_reply = None
         self._console_allocated_by_app = False
         self._shortcut_map = dict(DEFAULT_SHORTCUTS)
         for key in self._shortcut_map:
@@ -631,8 +649,10 @@ class ERPWorkbench(QMainWindow):
         self._responsive_timer.setInterval(70)
         self._responsive_timer.timeout.connect(self._apply_responsive_layout)
         QTimer.singleShot(0, self._apply_responsive_layout)
-        # Update checks are network-only conveniences. They run in the background,
-        # never block startup, and failures are silent unless the user checks manually.
+
+        # Stable update checks are optional and never block analysis. A per-check
+        # GUI timer aborts the Qt network reply if the request does not complete
+        # promptly (including pathological DNS/network states on Windows).
         QTimer.singleShot(5000, self._maybe_check_for_updates)
 
         self.preview_timer = QTimer(self)
@@ -704,7 +724,7 @@ class ERPWorkbench(QMainWindow):
         preferences_action = QAction("Preferences…", self); preferences_action.triggered.connect(self._show_settings_dialog); settings_menu.addAction(preferences_action)
 
         help_menu = self.menuBar().addMenu("&Help")
-        methodology_action = QAction("Methodology & readings…", self); methodology_action.triggered.connect(self._show_help_dialog); help_menu.addAction(methodology_action)
+        methodology_action = QAction("Readings…", self); methodology_action.triggered.connect(self._show_help_dialog); help_menu.addAction(methodology_action)
         help_menu.addSeparator()
         update_action = QAction("Check for updates…", self); update_action.triggered.connect(lambda _checked=False: self._check_for_updates(manual=True)); help_menu.addAction(update_action)
         about_action = QAction("About ERP Workbench…", self); about_action.triggered.connect(self._show_about_dialog); help_menu.addAction(about_action)
@@ -852,15 +872,22 @@ class ERPWorkbench(QMainWindow):
             app.setPalette(palette)
 
             app.setStyleSheet(f"""
-                QWidget {{ color: {c['text']}; background-color: {c['window']}; }}
+                QWidget {{ color: {c['text']}; background-color: {c['window']}; font-family: "Segoe UI"; font-size: 12px; }}
                 QMainWindow, QDialog {{ background-color: {c['window']}; }}
                 QLabel, QCheckBox, QRadioButton {{ background: transparent; color: {c['text']}; }}
                 QLabel[muted="true"] {{ color: {c['muted']}; }}
-                QGroupBox {{
-                    font-weight: 600; border: 1px solid {c['border']}; border-radius: 6px;
-                    margin-top: 10px; padding-top: 8px; background: {c['panel']}; color: {c['text']};
+                QLabel[heading="true"] {{ font-size: 18px; font-weight: 700; padding: 2px 0 4px 0; }}
+                QLabel[subheading="true"] {{ font-size: 13px; font-weight: 650; padding: 1px 0; }}
+                QLabel[emphasis="true"] {{ font-weight: 600; }}
+                QLabel#BetaBanner {{
+                    font-weight: 700; padding: 7px 10px; border: 1px solid {c['highlight']};
+                    border-radius: 6px; background: {c['panel']};
                 }}
-                QGroupBox::title {{ subcontrol-origin: margin; left: 8px; padding: 0 4px; background: transparent; }}
+                QGroupBox {{
+                    font-weight: 400; border: 1px solid {c['border']}; border-radius: 6px;
+                    margin-top: 12px; padding-top: 9px; background: {c['panel']}; color: {c['text']};
+                }}
+                QGroupBox::title {{ subcontrol-origin: margin; left: 9px; padding: 0 5px; background: transparent; font-weight: 650; }}
                 QFrame#StepCard {{
                     border: 1px solid {c['border']}; border-radius: 7px;
                     background: {c['panel']};
@@ -903,17 +930,20 @@ class ERPWorkbench(QMainWindow):
                 QTabWidget::pane {{ border: 1px solid {c['border']}; background: {c['panel']}; }}
                 QTabBar::tab {{
                     background: {c['raised']}; color: {c['muted']}; border: 1px solid {c['border']};
-                    padding: 7px 12px; margin-right: 1px;
+                    padding: 8px 14px; margin-right: 1px; font-size: 12px;
                 }}
-                QTabBar::tab:selected {{ background: {c['panel']}; color: {c['text']}; }}
+                QTabBar::tab:selected {{ background: {c['panel']}; color: {c['text']}; font-weight: 650; border-bottom: 2px solid {c['highlight']}; }}
                 QTabBar::tab:disabled {{ color: {c['disabled']}; }}
                 QTableWidget {{ gridline-color: {c['border']}; }}
                 QHeaderView::section {{
                     background: {c['raised']}; color: {c['text']}; border: 1px solid {c['border']}; padding: 4px;
                 }}
-                QMenuBar {{ background: {c['window']}; color: {c['text']}; }}
+                QMenuBar {{ background: {c['window']}; color: {c['text']}; padding: 3px 5px; font-size: 12px; }}
+                QMenuBar::item {{ padding: 5px 9px; border-radius: 4px; }}
                 QMenuBar::item:selected {{ background: {c['hover']}; }}
-                QMenu {{ background: {c['panel']}; color: {c['text']}; border: 1px solid {c['border']}; }}
+                QMenu {{ background: {c['panel']}; color: {c['text']}; border: 1px solid {c['border']}; padding: 5px; font-size: 12px; }}
+                QMenu::item {{ padding: 7px 22px 7px 10px; border-radius: 3px; }}
+                QMenu::separator {{ height: 1px; background: {c['border']}; margin: 5px 7px; }}
                 QMenu::item:selected {{ background: {c['highlight']}; color: {c['highlight_text']}; }}
                 QStatusBar {{ background: {c['window']}; color: {c['muted']}; }}
                 QToolTip {{ background: {c['panel']}; color: {c['text']}; border: 1px solid {c['border']}; }}
@@ -1068,7 +1098,7 @@ class ERPWorkbench(QMainWindow):
         file_form.addRow("Subject", self.subject_edit)
         controls.addWidget(file_group)
 
-        self.filter_group = StepCard("Filter — order-independent", checked=False, expanded=False)
+        self.filter_group = StepCard("Filter", checked=False, expanded=False)
         fg = QFormLayout(self.filter_group.body)
         fg.setContentsMargins(14, 12, 14, 14)
         fg.setHorizontalSpacing(12)
@@ -1118,7 +1148,7 @@ class ERPWorkbench(QMainWindow):
         rg.addRow("Custom channels", self.ref_custom)
         controls.addWidget(self.ref_group)
 
-        self.ica_card = StepCard("ICA (BETA — fit/remove in tab 2)", checked=False, expanded=False)
+        self.ica_card = StepCard("ICA (BETA)", checked=False, expanded=False)
         self.ica_enabled = self.ica_card.enable_check
         self.ica_enabled.setToolTip(
             "ICA belongs to the ordered preprocessing stack. Upstream preprocessing changes invalidate an ICA fit."
@@ -1126,10 +1156,10 @@ class ERPWorkbench(QMainWindow):
         ica_layout = QVBoxLayout(self.ica_card.body)
         ica_layout.setContentsMargins(14, 12, 14, 14)
         ica_layout.setSpacing(10)
-        ica_help = QLabel("Fit, inspect topographies/source time series, and select components in tab 2.")
+        ica_help = QLabel("Fit and review ICA components in the ICA workspace.")
         ica_help.setWordWrap(True)
         ica_help.setProperty("muted", True)
-        go_ica_btn = QPushButton("Go to ICA tab →")
+        go_ica_btn = QPushButton("Open ICA")
         go_ica_btn.clicked.connect(lambda: self.tabs.setCurrentIndex(1))
         self.go_ica_btn = go_ica_btn
         ica_layout.addWidget(ica_help)
@@ -1140,14 +1170,13 @@ class ERPWorkbench(QMainWindow):
         stack_layout = QVBoxLayout(stack_group)
         stack_layout.setContentsMargins(12, 14, 12, 12)
         stack_layout.setSpacing(7)
-        self.pipeline_label = QLabel("No structural steps active. Filtering is independent of step numbering.")
+        self.pipeline_label = QLabel("No structural preprocessing steps are active.")
         self.pipeline_label.setWordWrap(True)
-        stack_rule = QLabel("Structural rule: Interpolate → Re-reference → ICA (BETA)")
+        stack_rule = QLabel("Order: Interpolate → Re-reference → ICA (BETA). Filtering is independent.")
         stack_rule.setProperty("muted", True)
         stack_rule.setWordWrap(True)
         stack_rule.setToolTip(
-            "Unchecking an earlier structural step also undoes later steps in reverse order. "
-            "Filtering remains order-independent."
+            "Unchecking an earlier structural step also undoes later steps in reverse order."
         )
         stack_layout.addWidget(self.pipeline_label)
         stack_layout.addWidget(stack_rule)
@@ -1181,6 +1210,7 @@ class ERPWorkbench(QMainWindow):
         self.tabs.addTab(page, "1  Continuous EEG")
 
         # Toggling a preprocessing step now applies/undoes it automatically.
+        self.filter_group.setToolTip("Filtering is rebuilt independently from the imported recording; it is not part of the structural interpolation → re-reference → ICA order.")
         self.filter_group.toggled.connect(self._filter_toggled)
         self.interp_group.toggled.connect(lambda checked: self._structural_step_toggled("interpolation", checked))
         self.ref_group.toggled.connect(lambda checked: self._structural_step_toggled("reference", checked))
@@ -1366,7 +1396,7 @@ class ERPWorkbench(QMainWindow):
             f"{numbers['reference']}. Re-reference" if "reference" in numbers else "Re-reference"
         )
         self.ica_card.setTitle(
-            f"{numbers['ica']}. ICA (BETA — fit/remove in tab 2)" if "ica" in numbers else "ICA (BETA — fit/remove in tab 2)"
+            f"{numbers['ica']}. ICA (BETA)" if "ica" in numbers else "ICA (BETA)"
         )
         names = {"interpolation": "Interpolate", "reference": "Re-reference", "ica": "ICA"}
         if self._processing_order:
@@ -1576,7 +1606,7 @@ class ERPWorkbench(QMainWindow):
                 "No reliable EEG sensor montage could be inferred automatically; ICA topomaps may require channel-location metadata."
             )
         self.file_label.setText(Path(path).name)
-        self.setWindowTitle(f"ERP Workbench 1.0 — {Path(path).name} — ICA BETA")
+        self.setWindowTitle(f"ERP Workbench — {Path(path).name}")
         self.annotation_label.setText(
             f"No external TXT attached ({len(self._native_annotations)} annotation(s) already embedded in recording)"
             if len(self._native_annotations) else "No external TXT attached"
@@ -1741,9 +1771,9 @@ class ERPWorkbench(QMainWindow):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(7)
 
-        beta = QLabel("ICA (BETA) — component removal is always an explicit user action.")
-        beta.setWordWrap(True)
-        beta.setStyleSheet("font-weight: 600; padding: 7px; border: 1px solid #a8752a; border-radius: 5px;")
+        beta = QLabel("ICA (BETA)")
+        beta.setObjectName("BetaBanner")
+        beta.setToolTip("ICA is available for deliberate artifact correction, but this workflow remains marked BETA pending further methodological/UI validation.")
         layout.addWidget(beta)
 
         self.ica_method = QComboBox(); self.ica_method.addItems(["fastica", "infomax", "infomax_extended"])
@@ -1869,7 +1899,7 @@ class ERPWorkbench(QMainWindow):
         self.ica_fit_side_show_btn.setVisible(False)
         self.ica_fit_side_show_btn.clicked.connect(lambda: self._toggle_ica_fit_side_panel(True))
         drag_hint = QLabel("Left-drag pans. Right-drag across a gross-artifact span to exclude it from ICA fitting.")
-        drag_hint.setWordWrap(True); drag_hint.setStyleSheet("font-weight: 600;")
+        drag_hint.setWordWrap(True); drag_hint.setProperty("emphasis", True)
         graph_bar.addWidget(self.ica_fit_side_show_btn); graph_bar.addWidget(drag_hint, 1)
         graph_layout.addLayout(graph_bar)
         self.ica_fit_view = StackedEEGViewer()
@@ -1895,7 +1925,7 @@ class ERPWorkbench(QMainWindow):
         classifier_row.addWidget(self.ica_auto_label_after_fit); classifier_row.addStretch(1)
         comp_layout.addLayout(classifier_row)
         advisory = QLabel("Confirm automatic suggestions with the component time-domain morphology and topographic map before removal.")
-        advisory.setWordWrap(True); advisory.setStyleSheet("font-weight: 600;"); comp_layout.addWidget(advisory)
+        advisory.setWordWrap(True); advisory.setProperty("emphasis", True); comp_layout.addWidget(advisory)
         self.blink_aid_status = QLabel("Blink correlation: not run.")
         self.blink_aid_status.setWordWrap(True); self.blink_aid_status.setProperty("muted", True); comp_layout.addWidget(self.blink_aid_status)
         self.iclabel_status = QLabel("ICLabel: trained component classifier; not run. Treat its class/probability as a suggestion because performance depends on how closely the recording and ICA decomposition resemble the data on which the model was trained.")
@@ -5091,9 +5121,9 @@ class ERPWorkbench(QMainWindow):
         page = QWidget(); outer = QVBoxLayout(page)
         outer.setContentsMargins(12, 12, 12, 12); outer.setSpacing(10)
 
-        title = QLabel("<h2>Settings</h2>"); title.setTextFormat(Qt.TextFormat.RichText)
+        title = QLabel("Settings"); title.setProperty("heading", True)
         intro = QLabel(
-            "Shortcut and display preferences are stored for this Windows user account and do not change the EEG data."
+            "Application preferences are stored for this Windows user account and do not alter EEG data."
         )
         intro.setWordWrap(True); intro.setProperty("muted", True)
         outer.addWidget(title); outer.addWidget(intro)
@@ -5183,7 +5213,7 @@ class ERPWorkbench(QMainWindow):
         check_update_btn.clicked.connect(lambda: self._check_for_updates(manual=True))
         update_row.addWidget(check_update_btn); update_row.addStretch(1)
         ul.addLayout(update_row)
-        source_note = QLabel("Update source: GitHub Releases · haneechaitanya/Neurophysiology-Workbench. Analysis remains fully offline-capable when no network is available.")
+        source_note = QLabel("Updates are checked through GitHub Releases. Update checks are optional; EEG/ERP analysis remains fully available offline.")
         source_note.setWordWrap(True); source_note.setProperty("muted", True); ul.addWidget(source_note)
         outer.addWidget(update_box)
 
@@ -5193,14 +5223,14 @@ class ERPWorkbench(QMainWindow):
     def _build_help_tab(self):
         page = QWidget(); outer = QVBoxLayout(page)
         outer.setContentsMargins(12, 12, 12, 12); outer.setSpacing(10)
-        heading = QLabel("<h2>Methodology & readings</h2>"); heading.setTextFormat(Qt.TextFormat.RichText)
+        heading = QLabel("Readings"); heading.setProperty("heading", True)
         outer.addWidget(heading)
         note = QLabel(
-            "Open any processing step for a local explanation of the method, why it matters, what ERP Workbench does, cautions, scientific reading and MNE documentation."
+            "Select a processing step for the scientific basis, ERP Workbench implementation, practical cautions, open-access reading, and relevant MNE documentation."
         )
         note.setWordWrap(True); note.setProperty("muted", True); outer.addWidget(note)
 
-        reading = QGroupBox("Processing-step reading")
+        reading = QGroupBox("Processing methods")
         rl = QVBoxLayout(reading)
         self.help_topic_list = QListWidget()
         for topic in HELP_TOPICS:
@@ -5225,7 +5255,7 @@ class ERPWorkbench(QMainWindow):
 
     def _show_help_dialog(self):
         if not hasattr(self,"_help_dialog") or self._help_dialog is None:
-            dlg=QDialog(self); dlg.setWindowTitle("ERP Workbench — Methodology & readings"); dlg.resize(820,700)
+            dlg=QDialog(self); dlg.setWindowTitle("ERP Workbench — Readings"); dlg.resize(820,700)
             lay=QVBoxLayout(dlg); lay.addWidget(self.help_page,1)
             close=QDialogButtonBox(QDialogButtonBox.StandardButton.Close); close.rejected.connect(dlg.hide); lay.addWidget(close)
             self._help_dialog=dlg
@@ -5268,48 +5298,154 @@ class ERPWorkbench(QMainWindow):
         self._check_for_updates(manual=False)
 
     def _check_for_updates(self, manual: bool = False):
+        # Reuse an in-flight startup check when the user asks manually. The
+        # manual request will receive the eventual result (or timeout) instead
+        # of starting a competing network operation.
         if self._update_check_inflight:
             if manual:
-                self.status_label.setText("An update check is already running.")
+                self._update_manual_waiting = True
+                self.status_label.setText("Update check in progress…")
             return
-        self._update_check_inflight = True
-        if manual:
-            self.status_label.setText("Checking for updates…")
-        worker = FunctionWorker(updater.fetch_latest_release)
-        worker.signals.progress.connect(self.status_label.setText)
-        worker.signals.result.connect(lambda release, m=manual: self._update_check_result(release, m))
-        worker.signals.error.connect(lambda details, m=manual: self._update_check_error(details, m))
-        worker.signals.finished.connect(lambda: self._finish_update_check())
-        self.thread_pool.start(worker)
 
-    def _finish_update_check(self):
+        self._update_check_generation += 1
+        generation = self._update_check_generation
+        self._update_active_generation = generation
+        self._update_check_inflight = True
+        self._update_manual_waiting = bool(manual)
+        self.status_label.setText("Checking for updates…")
+
+        request = QNetworkRequest(QUrl(updater.LATEST_RELEASE_API))
+        request.setRawHeader(b"Accept", b"application/vnd.github+json")
+        request.setRawHeader(b"X-GitHub-Api-Version", str(updater.GITHUB_API_VERSION).encode("ascii", "ignore"))
+        request.setRawHeader(b"User-Agent", b"ERP-Workbench-Updater")
+        try:
+            # Qt 6 transfer timeout is an additional guard; the GUI single-shot
+            # below remains authoritative because it also covers DNS stalls.
+            request.setTransferTimeout(12000)
+        except Exception:
+            pass
+
+        reply = self._update_network_manager.get(request)
+        self._update_reply = reply
+        reply.finished.connect(lambda r=reply, m=manual, g=generation: self._update_qt_reply_finished(r, m, g))
+        QTimer.singleShot(self._update_check_timeout_ms, lambda g=generation: self._update_check_timed_out(g))
+
+    def _update_qt_reply_finished(self, reply, manual: bool, generation: int):
+        # A late reply from an aborted/timed-out request must never modify UI
+        # state belonging to a newer check.
+        if generation != self._update_active_generation or not self._update_check_inflight:
+            try:
+                reply.deleteLater()
+            except Exception:
+                pass
+            return
+
+        try:
+            status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+            status_code = int(status) if status is not None else 0
+        except Exception:
+            status_code = 0
+        error = reply.error()
+        payload = bytes(reply.readAll())
+        self._update_reply = None
+
+        try:
+            if error != QNetworkReply.NetworkError.NoError:
+                if status_code == 404:
+                    self._update_check_error("NoPublicRelease", manual)
+                else:
+                    self._update_check_error(f"Could not reach GitHub: {reply.errorString()}", manual)
+                return
+
+            try:
+                parsed = json.loads(payload.decode("utf-8"))
+                release = updater.release_from_payload(parsed)
+            except Exception as exc:
+                self._update_check_error(f"GitHub returned an unreadable release response: {exc}", manual)
+                return
+            if not str(getattr(release, "tag_name", "") or "").strip():
+                self._update_check_error("GitHub's latest release did not contain a version tag.", manual)
+                return
+            self._update_check_result(release, manual)
+        finally:
+            try:
+                reply.deleteLater()
+            except Exception:
+                pass
+            self._finish_update_check(generation)
+
+    def _update_check_timed_out(self, generation: int | None = None):
+        if not self._update_check_inflight:
+            return
+        if generation is not None and generation != self._update_active_generation:
+            return
+        show_result = bool(self._update_manual_waiting)
+        # Invalidate first, then abort the Qt reply. abort() may itself schedule a
+        # finished signal, which will be ignored because the generation is stale.
+        reply = self._update_reply
+        self._update_active_generation = 0
         self._update_check_inflight = False
+        self._update_manual_waiting = False
+        self._update_reply = None
+        if reply is not None:
+            try:
+                reply.abort()
+                reply.deleteLater()
+            except Exception:
+                pass
+        self.status_label.setText("Ready.")
+        if show_result:
+            QMessageBox.information(
+                self,
+                "ERP Workbench updates",
+                "The update check timed out. ERP Workbench remains fully available offline.\n\n"
+                "You can try again later when a network connection is available.",
+            )
+
+    def _finish_update_check(self, generation: int):
+        if generation != self._update_active_generation:
+            return
+        self._update_check_inflight = False
+        self._update_manual_waiting = False
+        self._update_active_generation = 0
+        self._update_reply = None
         self.app_settings.setValue("updates/last_check_utc", datetime.now(timezone.utc).isoformat())
+        if self.status_label.text().startswith("Checking") or self.status_label.text().startswith("Update check"):
+            self.status_label.setText("Ready.")
 
     def _update_check_error(self, details: str, manual: bool):
+        show_result = bool(manual or self._update_manual_waiting)
         text = str(details or "")
+        self.status_label.setText("Ready.")
         if "NoPublicRelease" in text or "No public stable GitHub release" in text:
-            if manual:
+            if show_result:
                 QMessageBox.information(
                     self,
                     "ERP Workbench updates",
                     "No public stable release is available yet. This is expected while the GitHub repository is private or before the first release is published.",
                 )
             return
-        if manual:
-            QMessageBox.warning(self, "Update check unavailable", "ERP Workbench could not check for updates right now.\n\n" + text[-1500:])
-        else:
-            self.status_label.setText("Ready.")
+        if show_result:
+            QMessageBox.warning(
+                self,
+                "Update check unavailable",
+                "ERP Workbench could not check for updates right now.\n\n" + text[-1200:],
+            )
 
     def _update_check_result(self, release, manual: bool):
+        show_result = bool(manual or self._update_manual_waiting)
         tag = str(getattr(release, "tag_name", "") or "")
         if not updater.is_newer_version(tag, __version__):
-            if manual:
-                QMessageBox.information(self, "ERP Workbench updates", f"ERP Workbench {__version__} is up to date.\n\nLatest stable release: {tag}")
-            else:
-                self.status_label.setText("Ready.")
+            self.status_label.setText("Ready.")
+            if show_result:
+                QMessageBox.information(
+                    self,
+                    "ERP Workbench updates",
+                    f"ERP Workbench {__version__} is up to date.\n\nLatest stable release: {tag}",
+                )
             return
 
+        self.status_label.setText(f"ERP Workbench {tag} is available.")
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Information)
         box.setWindowTitle("ERP Workbench update available")
@@ -5319,7 +5455,7 @@ class ERPWorkbench(QMainWindow):
             box.setDetailedText(notes[:12000])
         download_btn = box.addButton("Download update", QMessageBox.ButtonRole.AcceptRole)
         view_btn = box.addButton("View release", QMessageBox.ButtonRole.ActionRole)
-        later_btn = box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+        box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
         if getattr(release, "asset", None) is None:
             download_btn.setEnabled(False)
             download_btn.setToolTip("No Windows installer asset is attached to this release.")

@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 from mne.preprocessing import ICA
 
+from . import __version__
 from .models import (
     ComponentDefinition,
     EpochReviewState,
@@ -1215,6 +1216,7 @@ def export_excel(
 
     prep = asdict(preprocessing)
     prep_rows = [
+        ("erp_workbench_version", __version__),
         ("input_path", str(metadata.input_path or "")),
         ("subject_id", metadata.subject_id),
         ("notes", metadata.notes),
@@ -1339,6 +1341,7 @@ def save_average_package(
     manifest = {
         "format": "ERPWorkbenchAveragePackage",
         "format_version": 1,
+        "erp_workbench_version": __version__,
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "subject_id": str(getattr(metadata, "subject_id", "") or ""),
         "input_path": str(getattr(metadata, "input_path", "") or ""),
@@ -1927,6 +1930,7 @@ def export_grand_average_excel(
             "protocol_id": validated["protocol_hash"],
             "conditions": len(manifest.get("conditions", []) or []),
             "created_utc": str(manifest.get("created_utc", "") or ""),
+            "erp_workbench_version": str(manifest.get("erp_workbench_version", "") or "unknown / pre-provenance build"),
         })
     files_df = pd.DataFrame(file_rows)
     diff_df = pd.DataFrame([
@@ -1934,6 +1938,7 @@ def export_grand_average_excel(
         for a, b in differences
     ])
     metadata_df = pd.DataFrame([
+        ("erp_workbench_version", __version__),
         ("subject_count", n_subjects),
         ("protocol_name", str((protocol_data or {}).get("name", "") or "")),
         ("protocol_id", validated["protocol_hash"]),

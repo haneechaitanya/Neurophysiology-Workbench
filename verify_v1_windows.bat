@@ -1,5 +1,7 @@
 @echo off
 setlocal
+set "NO_PAUSE="
+if /I "%~1"=="--no-pause" set "NO_PAUSE=1"
 cd /d "%~dp0"
 if exist ".venv\Scripts\python.exe" (set "PY=.venv\Scripts\python.exe") else (set "PY=python")
 set "PYTHONPATH=%CD%"
@@ -28,6 +30,7 @@ for %%T in (
   smoke_protocol_exclusions_v10.py
   smoke_protocol_display_components_v10.py
   smoke_updater_v10.py
+  smoke_release_provenance_v10.py
 ) do (
   echo   %%T
   %PY% "tests\%%T" || goto :fail
@@ -35,11 +38,11 @@ for %%T in (
 
 echo.
 echo ALL V1.0 BACKEND CHECKS PASSED.
-pause
+if not defined NO_PAUSE pause
 exit /b 0
 
 :fail
 echo.
 echo VERIFICATION FAILED. Review the error above.
-pause
+if not defined NO_PAUSE pause
 exit /b 1
