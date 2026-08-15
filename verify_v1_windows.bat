@@ -27,6 +27,7 @@ for %%T in (
   smoke_p2p_v10.py
   smoke_protocol_exclusions_v10.py
   smoke_protocol_display_components_v10.py
+  smoke_updater_v10.py
 ) do (
   echo   %%T
   %PY% "tests\%%T" || goto :fail

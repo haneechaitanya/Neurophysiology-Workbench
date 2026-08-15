@@ -7,6 +7,7 @@ import os
 import re
 import ctypes
 import sys
+import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -58,7 +59,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import engine
+from . import engine, updater
+from . import __version__
 from .models import (
     ComponentDefinition,
     EpochReviewState,
@@ -493,6 +495,9 @@ class ERPWorkbench(QMainWindow):
         self.resize(1500, 920)
 
         self.app_settings = QSettings("ERP Workbench", "ERP Workbench")
+        self._auto_update_checks = str(self.app_settings.value("updates/auto_check", "true")).lower() not in {"0", "false", "no"}
+        self._update_check_inflight = False
+        self._update_download_inflight = False
         self._console_allocated_by_app = False
         self._shortcut_map = dict(DEFAULT_SHORTCUTS)
         for key in self._shortcut_map:
@@ -626,6 +631,9 @@ class ERPWorkbench(QMainWindow):
         self._responsive_timer.setInterval(70)
         self._responsive_timer.timeout.connect(self._apply_responsive_layout)
         QTimer.singleShot(0, self._apply_responsive_layout)
+        # Update checks are network-only conveniences. They run in the background,
+        # never block startup, and failures are silent unless the user checks manually.
+        QTimer.singleShot(5000, self._maybe_check_for_updates)
 
         self.preview_timer = QTimer(self)
         self.preview_timer.setSingleShot(True)
@@ -697,6 +705,9 @@ class ERPWorkbench(QMainWindow):
 
         help_menu = self.menuBar().addMenu("&Help")
         methodology_action = QAction("Methodology & readings…", self); methodology_action.triggered.connect(self._show_help_dialog); help_menu.addAction(methodology_action)
+        help_menu.addSeparator()
+        update_action = QAction("Check for updates…", self); update_action.triggered.connect(lambda _checked=False: self._check_for_updates(manual=True)); help_menu.addAction(update_action)
+        about_action = QAction("About ERP Workbench…", self); about_action.triggered.connect(self._show_about_dialog); help_menu.addAction(about_action)
 
     def _open_erp_preprocessing_tool(self, tool: str):
         """Open the ERP workflow and expose an EEG-specific preprocessing card.
@@ -5160,6 +5171,22 @@ class ERPWorkbench(QMainWindow):
         path_note = QLabel("Protocols in this folder populate the Epoching protocol dropdown. Load JSON / Save JSON can still access a protocol anywhere else.")
         path_note.setWordWrap(True); path_note.setProperty("muted", True); pl.addRow(path_note)
         outer.addWidget(path_box)
+
+        update_box = QGroupBox("Updates")
+        ul = QVBoxLayout(update_box)
+        self.auto_update_checkbox = QCheckBox("Automatically check for stable updates")
+        self.auto_update_checkbox.setChecked(self._auto_update_checks)
+        self.auto_update_checkbox.toggled.connect(self._set_auto_update_checks)
+        ul.addWidget(self.auto_update_checkbox)
+        update_row = QHBoxLayout()
+        check_update_btn = QPushButton("Check now…")
+        check_update_btn.clicked.connect(lambda: self._check_for_updates(manual=True))
+        update_row.addWidget(check_update_btn); update_row.addStretch(1)
+        ul.addLayout(update_row)
+        source_note = QLabel("Update source: GitHub Releases · haneechaitanya/Neurophysiology-Workbench. Analysis remains fully offline-capable when no network is available.")
+        source_note.setWordWrap(True); source_note.setProperty("muted", True); ul.addWidget(source_note)
+        outer.addWidget(update_box)
+
         outer.addStretch(1)
         self.settings_page = page
 
@@ -5217,6 +5244,148 @@ class ERPWorkbench(QMainWindow):
             return
         dlg = HelpTopicDialog(str(topic), info, self)
         dlg.exec()
+
+    # ---------- Updates / About ----------
+    def _set_auto_update_checks(self, enabled: bool):
+        self._auto_update_checks = bool(enabled)
+        self.app_settings.setValue("updates/auto_check", self._auto_update_checks)
+        if self._auto_update_checks:
+            self.app_settings.remove("updates/last_check_utc")
+
+    def _maybe_check_for_updates(self):
+        if not self._auto_update_checks or self._update_check_inflight:
+            return
+        last = str(self.app_settings.value("updates/last_check_utc", "") or "").strip()
+        if last:
+            try:
+                previous = datetime.fromisoformat(last.replace("Z", "+00:00"))
+                if previous.tzinfo is None:
+                    previous = previous.replace(tzinfo=timezone.utc)
+                if (datetime.now(timezone.utc) - previous).total_seconds() < 24 * 3600:
+                    return
+            except Exception:
+                pass
+        self._check_for_updates(manual=False)
+
+    def _check_for_updates(self, manual: bool = False):
+        if self._update_check_inflight:
+            if manual:
+                self.status_label.setText("An update check is already running.")
+            return
+        self._update_check_inflight = True
+        if manual:
+            self.status_label.setText("Checking for updates…")
+        worker = FunctionWorker(updater.fetch_latest_release)
+        worker.signals.progress.connect(self.status_label.setText)
+        worker.signals.result.connect(lambda release, m=manual: self._update_check_result(release, m))
+        worker.signals.error.connect(lambda details, m=manual: self._update_check_error(details, m))
+        worker.signals.finished.connect(lambda: self._finish_update_check())
+        self.thread_pool.start(worker)
+
+    def _finish_update_check(self):
+        self._update_check_inflight = False
+        self.app_settings.setValue("updates/last_check_utc", datetime.now(timezone.utc).isoformat())
+
+    def _update_check_error(self, details: str, manual: bool):
+        text = str(details or "")
+        if "NoPublicRelease" in text or "No public stable GitHub release" in text:
+            if manual:
+                QMessageBox.information(
+                    self,
+                    "ERP Workbench updates",
+                    "No public stable release is available yet. This is expected while the GitHub repository is private or before the first release is published.",
+                )
+            return
+        if manual:
+            QMessageBox.warning(self, "Update check unavailable", "ERP Workbench could not check for updates right now.\n\n" + text[-1500:])
+        else:
+            self.status_label.setText("Ready.")
+
+    def _update_check_result(self, release, manual: bool):
+        tag = str(getattr(release, "tag_name", "") or "")
+        if not updater.is_newer_version(tag, __version__):
+            if manual:
+                QMessageBox.information(self, "ERP Workbench updates", f"ERP Workbench {__version__} is up to date.\n\nLatest stable release: {tag}")
+            else:
+                self.status_label.setText("Ready.")
+            return
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("ERP Workbench update available")
+        box.setText(f"ERP Workbench {tag} is available.\nInstalled version: {__version__}")
+        notes = str(getattr(release, "body", "") or "").strip()
+        if notes:
+            box.setDetailedText(notes[:12000])
+        download_btn = box.addButton("Download update", QMessageBox.ButtonRole.AcceptRole)
+        view_btn = box.addButton("View release", QMessageBox.ButtonRole.ActionRole)
+        later_btn = box.addButton("Later", QMessageBox.ButtonRole.RejectRole)
+        if getattr(release, "asset", None) is None:
+            download_btn.setEnabled(False)
+            download_btn.setToolTip("No Windows installer asset is attached to this release.")
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is download_btn:
+            self._download_update(release)
+        elif clicked is view_btn:
+            url = str(getattr(release, "html_url", "") or "")
+            if url:
+                QDesktopServices.openUrl(QUrl(url))
+
+    def _download_update(self, release):
+        if self._update_download_inflight:
+            return
+        self._update_download_inflight = True
+        self.global_task_progress.setRange(0, 0)
+        self.global_task_progress.setVisible(True)
+        self.global_task_eta.setVisible(True)
+        self.global_task_eta.setText("Downloading update…")
+        worker = FunctionWorker(updater.download_release_asset, release)
+        worker.signals.progress.connect(self._update_download_progress)
+        worker.signals.result.connect(lambda path: self._update_download_ready(Path(path)))
+        worker.signals.error.connect(self._update_download_error)
+        worker.signals.finished.connect(self._finish_update_download)
+        self.thread_pool.start(worker)
+
+    def _update_download_progress(self, text: str):
+        self.status_label.setText(str(text))
+        self.global_task_eta.setText(str(text))
+
+    def _finish_update_download(self):
+        self._update_download_inflight = False
+        self.global_task_progress.setVisible(False)
+        self.global_task_eta.setVisible(False)
+
+    def _update_download_error(self, details: str):
+        QMessageBox.critical(self, "Update download failed", str(details or "")[-2500:])
+
+    def _update_download_ready(self, installer_path: Path):
+        answer = QMessageBox.question(
+            self,
+            "Install ERP Workbench update",
+            "The installer was downloaded and its SHA-256 digest was verified when GitHub supplied one.\n\nClose ERP Workbench and start the installer now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            QMessageBox.information(self, "Update downloaded", f"The installer is ready at:\n{installer_path}")
+            return
+        try:
+            subprocess.Popen([str(installer_path), "/SP-", "/NORESTART"], close_fds=True)
+        except Exception as exc:
+            QMessageBox.critical(self, "Could not start installer", str(exc))
+            return
+        QApplication.instance().quit()
+
+    def _show_about_dialog(self):
+        QMessageBox.about(
+            self,
+            "About ERP Workbench",
+            f"<h3>ERP Workbench {__version__}</h3>"
+            "<p>MNE-Python based desktop workstation for transparent EEG/ERP analysis.</p>"
+            "<p><b>ICA workflow:</b> BETA</p>"
+            "<p>Project repository: haneechaitanya/Neurophysiology-Workbench</p>",
+        )
 
     def _update_trace_color_swatch(self, color: str):
         if not hasattr(self, "trace_color_swatch"):
