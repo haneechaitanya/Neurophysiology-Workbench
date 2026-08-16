@@ -1,0 +1,48 @@
+# Audited Windows x86-64 runtime lock for ERP Workbench 1.0.
+# Captured 2026-08-16 from CPython 3.13.13; pip check passed.
+# Install this only in a clean release environment. Wheel hashes will be added
+# after the final wheelhouse is downloaded and verified.
+certifi==2026.7.22
+charset-normalizer==3.5.1
+colorama==0.4.6
+contourpy==1.3.3
+cycler==0.12.1
+decorator==5.3.1
+et_xmlfile==2.0.0
+flatbuffers==25.12.19
+fonttools==4.63.0
+idna==3.18
+Jinja2==3.1.6
+joblib==1.5.3
+kiwisolver==1.5.0
+lazy-loader==0.5
+MarkupSafe==3.0.3
+matplotlib==3.11.1
+mne==1.12.1
+mne-icalabel==0.9.0
+narwhals==2.24.0
+numpy==2.5.2
+onnxruntime==1.28.0
+openpyxl==3.1.5
+packaging==26.3
+pandas==3.0.5
+pillow==12.3.0
+platformdirs==4.11.3
+pooch==1.9.0
+protobuf==7.35.1
+psutil==7.2.2
+pyparsing==3.3.2
+pyqtgraph==0.14.0
+PySide6==6.11.1
+PySide6_Addons==6.11.1
+PySide6_Essentials==6.11.1
+python-dateutil==2.9.0.post0
+requests==2.34.2
+scikit-learn==1.9.0
+scipy==1.18.0
+shiboken6==6.11.1
+six==1.17.0
+threadpoolctl==3.6.0
+tqdm==4.70.0
+tzdata==2026.3
+urllib3==2.7.0

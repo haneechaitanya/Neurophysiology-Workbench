@@ -60,6 +60,13 @@ not the preferred public download.
 15. Publish the signed and timestamped direct installer with SHA-256 checksums
     after signature verification and clean-install retesting.
 
+The package-level dependency audit and provisional notice bundle were created
+from the 2026-08-16 Windows inventory. Before gate 4 is considered complete,
+the actual `dist/ERPWorkbench` and MSIX contents must be checked against
+`THIRD_PARTY_NOTICES.md` and `QT_PYSIDE_COMPLIANCE.md`. Exact Qt/PySide source
+archives must be published with the source release; an upstream link alone is
+not the final source-delivery plan.
+
 ## Collecting the private dependency inventory
 
 Before the dependency lock and third-party notices are finalized, run
@@ -68,6 +75,47 @@ Before the dependency lock and third-party notices are finalized, run
 virtual environment itself, usernames, hostnames, environment variables,
 credentials, participant data, EEG files, and analysis exports. The generated
 ZIP is a private audit input and is not committed to the public repository.
+
+After `build_windows.bat` succeeds, run
+`collect_built_artifact_audit_windows.bat`. It creates a second privacy-safe ZIP
+containing only relative filenames, sizes, SHA-256 hashes, and classifications
+from `dist/ERPWorkbench`. Audit format version 2 also records public Windows PE
+version-resource fields for native binaries. Review that audit before building
+either installer.
+
+## Generating the SBOM and private security audit
+
+Security tools are deliberately kept out of the audited release `.venv`:
+
+1. Run `setup_security_tools_windows.bat` once while connected to the internet.
+   It creates the ignored `.security-venv` and installs `pip-audit`, Bandit, and
+   detect-secrets there.
+2. Run `run_security_audit_windows.bat`. It generates a deterministic
+   CycloneDX 1.6 JSON SBOM from the exact runtime lock and installed metadata,
+   checks package consistency and known dependency advisories, scans Python
+   source for common security patterns and possible secrets, and requests a
+   Microsoft Defender custom scan of the accepted `dist/ERPWorkbench` folder.
+3. Review every finding. A non-zero audit-tool exit code commonly means that a
+   finding was recorded; it is not automatically proof of an exploitable
+   vulnerability.
+4. Upload the newly created `security_audit/ERP_Workbench_security_audit_*.zip`
+   for private review. Do not commit the private audit directory.
+
+The archive excludes source contents/code snippets, raw secret values,
+environment variables, usernames, hostnames, credentials, participant data,
+EEG files, and analysis exports. The final reviewed SBOM—not the full private
+audit archive—will be published with the release.
+
+The 2026-08-16 private release-candidate audit passed package consistency,
+known-vulnerability, possible-secret, and Microsoft Defender checks. Bandit's
+two medium URL-opener findings were reviewed against the updater's HTTPS,
+repository-path, redirect-host, size, and SHA-256 controls and assessed as
+false positives. See [`SECURITY_AUDIT_REVIEW.md`](SECURITY_AUDIT_REVIEW.md).
+These results must be repeated for the exact public-release commit and final
+Store package.
+
+Store identity, channel isolation, manifest capabilities, and the staging-build
+procedure are documented in [`STORE_PACKAGING.md`](STORE_PACKAGING.md).
 
 ## Current build characteristics
 

@@ -11,6 +11,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from erpworkbench import __version__
+from erpworkbench.build_channel import IS_STORE_BUILD
 from erpworkbench.main_window import ERPWorkbench
 
 
@@ -26,7 +27,7 @@ def resource_path(*parts: str) -> Path:
 
 def configure_windows_app_identity() -> None:
     """Give the frozen app a stable Windows taskbar identity."""
-    if sys.platform != "win32":
+    if sys.platform != "win32" or IS_STORE_BUILD:
         return
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(

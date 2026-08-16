@@ -30,6 +30,8 @@ for %%T in (
   smoke_protocol_exclusions_v10.py
   smoke_protocol_display_components_v10.py
   smoke_updater_v10.py
+  smoke_store_channel_v10.py
+  smoke_store_packaging_v10.py
   smoke_release_provenance_v10.py
 ) do (
   echo   %%T

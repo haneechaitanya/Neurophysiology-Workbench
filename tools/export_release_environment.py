@@ -33,6 +33,15 @@ HASH_TARGETS = (
     "version_info.txt",
     "build_v1_installer_windows.bat",
     "verify_v1_windows.bat",
+    "setup_security_tools_windows.bat",
+    "run_security_audit_windows.bat",
+    "build_store_msix_windows.bat",
+    "tools/generate_sbom.py",
+    "tools/run_security_audit.py",
+    "tools/prepare_msix_assets.py",
+    "tools/audit_store_package.py",
+    "tools/find_windows_sdk_tool.ps1",
+    "store/AppxManifest.xml",
     "installer/ERPWorkbench_v1.0.iss",
 )
 

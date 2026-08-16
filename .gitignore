@@ -131,6 +131,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.security-venv/
 env/
 venv/
 ENV/
@@ -184,6 +185,13 @@ cython_debug/
 # ERP Workbench release artifacts
 release/
 release_audit/
+security_audit/
+store_build/
+store_package/
+
+# Local signing secrets (never commit private keys)
+*.pfx
+*.p12
 
 # Keep the canonical PyInstaller build specification under version control
 !ERPWorkbench.spec

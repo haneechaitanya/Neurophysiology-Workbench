@@ -1,0 +1,9 @@
+# Build tools present in the audited Windows environment on 2026-08-16.
+# Install after requirements-runtime-lock-windows-py313.txt.
+altgraph==0.17.5
+pefile==2024.8.26
+pip==26.2.1
+pyinstaller==6.22.1
+pyinstaller-hooks-contrib==2026.6
+pywin32-ctypes==0.2.3
+setuptools==84.0.0

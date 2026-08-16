@@ -3,6 +3,8 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 set "BUILD_LOG=build_release.log"
+set "ERP_WORKBENCH_STORE_BUILD="
+set "ERP_WORKBENCH_DISTRIBUTION="
 
 echo ============================================================
 echo ERP Workbench - Windows release builder

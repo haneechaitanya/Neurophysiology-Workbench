@@ -61,8 +61,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import engine, updater
+from . import engine
 from . import __version__
+from .build_channel import IS_STORE_BUILD
+
+if IS_STORE_BUILD:
+    updater = None
+else:
+    from . import updater
 from .models import (
     ComponentDefinition,
     EpochReviewState,
@@ -503,7 +509,12 @@ class ERPWorkbench(QMainWindow):
         self.resize(1500, 920)
 
         self.app_settings = QSettings("ERP Workbench", "ERP Workbench")
-        self._auto_update_checks = str(self.app_settings.value("updates/auto_check", "true")).lower() not in {"0", "false", "no"}
+        self._auto_update_checks = (
+            False
+            if IS_STORE_BUILD
+            else str(self.app_settings.value("updates/auto_check", "true")).lower()
+            not in {"0", "false", "no"}
+        )
         self._update_check_inflight = False
         self._update_manual_waiting = False
         self._update_check_generation = 0
@@ -514,7 +525,7 @@ class ERPWorkbench(QMainWindow):
         # Python worker thread. This keeps DNS/socket activity outside the UI
         # thread and, importantly, gives the GUI a reply object it can abort on
         # timeout instead of waiting for a stuck urllib worker.
-        self._update_network_manager = QNetworkAccessManager(self)
+        self._update_network_manager = None if IS_STORE_BUILD else QNetworkAccessManager(self)
         self._update_reply = None
         self._console_allocated_by_app = False
         self._shortcut_map = dict(DEFAULT_SHORTCUTS)
@@ -653,7 +664,8 @@ class ERPWorkbench(QMainWindow):
         # Stable update checks are optional and never block analysis. A per-check
         # GUI timer aborts the Qt network reply if the request does not complete
         # promptly (including pathological DNS/network states on Windows).
-        QTimer.singleShot(5000, self._maybe_check_for_updates)
+        if not IS_STORE_BUILD:
+            QTimer.singleShot(5000, self._maybe_check_for_updates)
 
         self.preview_timer = QTimer(self)
         self.preview_timer.setSingleShot(True)
@@ -726,7 +738,8 @@ class ERPWorkbench(QMainWindow):
         help_menu = self.menuBar().addMenu("&Help")
         methodology_action = QAction("Readings…", self); methodology_action.triggered.connect(self._show_help_dialog); help_menu.addAction(methodology_action)
         help_menu.addSeparator()
-        update_action = QAction("Check for updates…", self); update_action.triggered.connect(lambda _checked=False: self._check_for_updates(manual=True)); help_menu.addAction(update_action)
+        if not IS_STORE_BUILD:
+            update_action = QAction("Check for updates…", self); update_action.triggered.connect(lambda _checked=False: self._check_for_updates(manual=True)); help_menu.addAction(update_action)
         about_action = QAction("About ERP Workbench…", self); about_action.triggered.connect(self._show_about_dialog); help_menu.addAction(about_action)
 
     def _open_erp_preprocessing_tool(self, tool: str):
@@ -5204,17 +5217,25 @@ class ERPWorkbench(QMainWindow):
 
         update_box = QGroupBox("Updates")
         ul = QVBoxLayout(update_box)
-        self.auto_update_checkbox = QCheckBox("Automatically check for stable updates")
-        self.auto_update_checkbox.setChecked(self._auto_update_checks)
-        self.auto_update_checkbox.toggled.connect(self._set_auto_update_checks)
-        ul.addWidget(self.auto_update_checkbox)
-        update_row = QHBoxLayout()
-        check_update_btn = QPushButton("Check now…")
-        check_update_btn.clicked.connect(lambda: self._check_for_updates(manual=True))
-        update_row.addWidget(check_update_btn); update_row.addStretch(1)
-        ul.addLayout(update_row)
-        source_note = QLabel("Updates are checked through GitHub Releases. Update checks are optional; EEG/ERP analysis remains fully available offline.")
-        source_note.setWordWrap(True); source_note.setProperty("muted", True); ul.addWidget(source_note)
+        if IS_STORE_BUILD:
+            self.auto_update_checkbox = None
+            source_note = QLabel(
+                "This Microsoft Store edition is updated only through Microsoft Store. "
+                "It contains no GitHub update checker or installer downloader."
+            )
+            source_note.setWordWrap(True); source_note.setProperty("muted", True); ul.addWidget(source_note)
+        else:
+            self.auto_update_checkbox = QCheckBox("Automatically check for stable updates")
+            self.auto_update_checkbox.setChecked(self._auto_update_checks)
+            self.auto_update_checkbox.toggled.connect(self._set_auto_update_checks)
+            ul.addWidget(self.auto_update_checkbox)
+            update_row = QHBoxLayout()
+            check_update_btn = QPushButton("Check now…")
+            check_update_btn.clicked.connect(lambda: self._check_for_updates(manual=True))
+            update_row.addWidget(check_update_btn); update_row.addStretch(1)
+            ul.addLayout(update_row)
+            source_note = QLabel("Updates are checked through GitHub Releases. Update checks are optional; EEG/ERP analysis remains fully available offline.")
+            source_note.setWordWrap(True); source_note.setProperty("muted", True); ul.addWidget(source_note)
         outer.addWidget(update_box)
 
         outer.addStretch(1)
@@ -5277,12 +5298,16 @@ class ERPWorkbench(QMainWindow):
 
     # ---------- Updates / About ----------
     def _set_auto_update_checks(self, enabled: bool):
+        if IS_STORE_BUILD:
+            return
         self._auto_update_checks = bool(enabled)
         self.app_settings.setValue("updates/auto_check", self._auto_update_checks)
         if self._auto_update_checks:
             self.app_settings.remove("updates/last_check_utc")
 
     def _maybe_check_for_updates(self):
+        if IS_STORE_BUILD:
+            return
         if not self._auto_update_checks or self._update_check_inflight:
             return
         last = str(self.app_settings.value("updates/last_check_utc", "") or "").strip()
@@ -5298,6 +5323,14 @@ class ERPWorkbench(QMainWindow):
         self._check_for_updates(manual=False)
 
     def _check_for_updates(self, manual: bool = False):
+        if IS_STORE_BUILD or updater is None or self._update_network_manager is None:
+            if manual:
+                QMessageBox.information(
+                    self,
+                    "ERP Workbench updates",
+                    "This edition receives updates only through Microsoft Store.",
+                )
+            return
         # Reuse an in-flight startup check when the user asks manually. The
         # manual request will receive the eventual result (or timeout) instead
         # of starting a competing network operation.
@@ -5469,6 +5502,8 @@ class ERPWorkbench(QMainWindow):
                 QDesktopServices.openUrl(QUrl(url))
 
     def _download_update(self, release):
+        if IS_STORE_BUILD or updater is None:
+            return
         if self._update_download_inflight:
             return
         self._update_download_inflight = True
@@ -5529,6 +5564,9 @@ class ERPWorkbench(QMainWindow):
             "author's direction, iterative testing, and review.</p>"
             "<p>Copyright &copy; 2026 H. C. Challa.<br>"
             "Licensed under the GNU AGPL, version 3 only. No warranty.</p>"
+            "<p>Uses Qt for Python 6 under the GNU LGPL, version 3 only. "
+            "Recipients may replace or rebuild the Qt/PySide libraries. "
+            "Third-party notices and license texts are installed with the application.</p>"
             "<p>Source and legal notices: "
             "<a href='https://github.com/haneechaitanya/Neurophysiology-Workbench'>"
             "github.com/haneechaitanya/Neurophysiology-Workbench</a></p>",

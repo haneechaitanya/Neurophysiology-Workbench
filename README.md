@@ -41,6 +41,14 @@ modify, and redistribute the software and requires corresponding source
 availability for redistributed versions and qualifying modified network
 deployments. See [LICENSE](LICENSE) for the complete terms.
 
-Third-party components retain their own copyright and license terms. A complete
-dependency notice and bundled license set will be finalized before the public
-1.0 release.
+Third-party components retain their own copyright and license terms. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the bundled
+[`licenses`](licenses) directory. Qt/PySide redistribution requirements and the
+remaining exact-source gates are recorded in
+[QT_PYSIDE_COMPLIANCE.md](QT_PYSIDE_COMPLIANCE.md); the accepted Windows
+dependency footprint is summarized in
+[BUILT_ARTIFACT_AUDIT.md](BUILT_ARTIFACT_AUDIT.md).
+
+The dedicated Microsoft Store build, reserved package identity, minimal
+capabilities, and updater exclusion are documented in
+[STORE_PACKAGING.md](STORE_PACKAGING.md).
