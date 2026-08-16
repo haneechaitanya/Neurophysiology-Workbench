@@ -1,6 +1,6 @@
 #define MyAppName "ERP Workbench"
 #define MyAppVersion "1.0.0rc4"
-#define MyAppPublisher "ERP Workbench"
+#define MyAppPublisher "H. C. Challa"
 #define MyAppExeName "ERPWorkbench.exe"
 
 [Setup]
@@ -8,6 +8,9 @@ AppId={{C8F4A27D-5A5D-4F65-BDF7-A1B2C3D4E5F6}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+AppPublisherURL=https://github.com/haneechaitanya/Neurophysiology-Workbench
+AppSupportURL=https://github.com/haneechaitanya/Neurophysiology-Workbench/issues
+AppUpdatesURL=https://github.com/haneechaitanya/Neurophysiology-Workbench/releases
 DefaultDirName={localappdata}\Programs\ERP Workbench
 DefaultGroupName=ERP Workbench
 DisableProgramGroupPage=yes

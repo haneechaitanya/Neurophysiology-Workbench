@@ -17,6 +17,8 @@ VSVersionInfo(
         [
           StringStruct('FileDescription', 'ERP Workbench'),
           StringStruct('FileVersion', '1.0.0rc4'),
+          StringStruct('CompanyName', 'H. C. Challa'),
+          StringStruct('LegalCopyright', 'Copyright (C) 2026 H. C. Challa'),
           StringStruct('InternalName', 'ERPWorkbench'),
           StringStruct('OriginalFilename', 'ERPWorkbench.exe'),
           StringStruct('ProductName', 'ERP Workbench'),

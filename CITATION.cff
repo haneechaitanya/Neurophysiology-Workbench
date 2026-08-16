@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use Neurophysiology Workbench or ERP Workbench in research, please cite the software using this metadata."
+title: "Neurophysiology Workbench: ERP Workbench"
+type: software
+authors:
+  - family-names: "Challa"
+    given-names: "H. C."
+    orcid: "https://orcid.org/0009-0009-3546-0027"
+abstract: >-
+  Neurophysiology Workbench is a modular scientific-software project. Its first
+  application, ERP Workbench, provides transparent Windows desktop workflows
+  for EEG and event-related potential analysis using MNE-Python.
+repository-code: "https://github.com/haneechaitanya/Neurophysiology-Workbench"
+url: "https://github.com/haneechaitanya/Neurophysiology-Workbench"
+license: "AGPL-3.0-only"
+version: "1.0.0rc4"
+keywords:
+  - EEG
+  - ERP
+  - neurophysiology
+  - MNE-Python
+  - scientific software

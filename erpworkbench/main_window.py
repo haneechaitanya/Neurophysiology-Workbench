@@ -5518,9 +5518,20 @@ class ERPWorkbench(QMainWindow):
             self,
             "About ERP Workbench",
             f"<h3>ERP Workbench {__version__}</h3>"
+            "<p>The first analysis application in the modular "
+            "<b>Neurophysiology Workbench</b> project.</p>"
             "<p>MNE-Python based desktop workstation for transparent EEG/ERP analysis.</p>"
             "<p><b>ICA workflow:</b> BETA</p>"
-            "<p>Project repository: haneechaitanya/Neurophysiology-Workbench</p>",
+            "<p>Conceived and scientifically directed by <b>Chaitanya</b>.<br>"
+            "Formal author: H. C. Challa &mdash; "
+            "<a href='https://orcid.org/0009-0009-3546-0027'>ORCID 0009-0009-3546-0027</a></p>"
+            "<p>Developed with extensive generative-AI assistance under the "
+            "author's direction, iterative testing, and review.</p>"
+            "<p>Copyright &copy; 2026 H. C. Challa.<br>"
+            "Licensed under the GNU AGPL, version 3 only. No warranty.</p>"
+            "<p>Source and legal notices: "
+            "<a href='https://github.com/haneechaitanya/Neurophysiology-Workbench'>"
+            "github.com/haneechaitanya/Neurophysiology-Workbench</a></p>",
         )
 
     def _update_trace_color_swatch(self, color: str):

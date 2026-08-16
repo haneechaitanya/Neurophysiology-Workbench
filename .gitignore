@@ -183,6 +183,7 @@ cython_debug/
 
 # ERP Workbench release artifacts
 release/
+release_audit/
 
 # Keep the canonical PyInstaller build specification under version control
 !ERPWorkbench.spec
