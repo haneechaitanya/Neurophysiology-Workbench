@@ -52,3 +52,16 @@ dependency footprint is summarized in
 The dedicated Microsoft Store build, reserved package identity, minimal
 capabilities, and updater exclusion are documented in
 [STORE_PACKAGING.md](STORE_PACKAGING.md).
+
+## Downloads, privacy, and code signing
+
+The current public release is the source-only
+[ERP Workbench 1.0.0rc4 release candidate](https://github.com/haneechaitanya/Neurophysiology-Workbench/releases/tag/v1.0.0rc4).
+An unsigned Windows installer is not presented as the recommended public
+download. Microsoft Store certification is in progress as the primary trusted
+distribution route.
+
+The project is applying to sign future direct-download Windows installers under
+the [code signing policy](CODE_SIGNING_POLICY.md): **Free code signing provided
+by SignPath.io, certificate by SignPath Foundation.** See [PRIVACY.md](PRIVACY.md)
+for the application's privacy policy.

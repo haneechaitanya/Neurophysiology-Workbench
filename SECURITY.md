@@ -2,17 +2,19 @@
 
 ## Supported release
 
-ERP Workbench has not yet reached its first public release. Until 1.0 is
-published, the private release candidate is the only version being prepared
-for security review. After 1.0, the latest supported release and the default
-branch will receive security fixes.
+ERP Workbench has published `v1.0.0rc4` as its first public source release
+candidate. It is not yet the final stable 1.0 release. During the pre-release
+period, the latest public release candidate and the default branch are the
+supported references for security review. After 1.0, the latest supported
+release and the default branch will receive security fixes.
 
 ## Reporting a vulnerability
 
 Please do not disclose a suspected vulnerability in a public issue. Use the
-repository's **Security** tab and select **Report a vulnerability** so the
-report can be discussed privately. The maintainer should enable GitHub private
-vulnerability reporting before making the repository public.
+repository's **Security** tab and select **Report a vulnerability** when that
+option is available. If it is unavailable, contact the maintainer through the
+GitHub profile without including vulnerability details and request a private
+reporting channel.
 
 Include the affected version, operating system, steps to reproduce, observed
 impact, and any safe proof-of-concept material. Do not include participant EEG,
